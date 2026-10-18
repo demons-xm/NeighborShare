@@ -109,21 +109,156 @@ npm run dev
 
 这些脚本仅用于已经有旧版 NeighborShare 表结构的数据库，不要在首次创建的数据库上重复执行。应用启动后可通过商家工作台创建优惠券和秒杀活动。
 
-## API 概览
+## API 接口说明
 
-消费者优惠券和秒杀接口：
+后端默认地址为 `http://127.0.0.1:8000`，接口使用 JSON。消费者认证接口以 `/api/v1/auth` 为前缀，其余业务接口以 `/api` 为前缀。启动后可访问 <http://127.0.0.1:8000/docs> 查看 FastAPI 生成的交互式文档；下表列出当前已实现的接口。
 
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/api/coupons` | 查询当前可领取优惠券 |
-| `POST` | `/api/coupons/{coupon_id}/claim` | 领取优惠券 |
-| `GET` | `/api/users/me/coupons` | 查询本人优惠券；可用 `status=available\|used\|expired` 筛选 |
-| `GET` | `/api/seckill/activities` | 查询即将开始和进行中的活动 |
-| `GET` | `/api/seckill/activities/{activity_id}` | 查询活动及剩余名额 |
-| `POST` | `/api/seckill/activities/{activity_id}/orders` | 秒杀下单，提交 `address_id` 和 `quantity` |
-| `POST` | `/api/orders` | 普通购物车下单；可选提交 `user_coupon_id` |
+### 认证、账号与权限
 
-商家管理接口位于 `/api/admin/coupons` 和 `/api/admin/seckill/activities` 下。非公开操作均需对应的消费者或商家 Bearer Token。所有接口统一使用 `{code, message, data}` 响应；金额由服务端计算。
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/register` | 公开 | 注册消费者，提交手机号和密码 |
+| `POST` | `/api/v1/auth/login` | 公开 | 消费者登录并获取访问令牌 |
+| `GET` | `/api/v1/auth/me` | 消费者 | 获取当前登录消费者 |
+| `POST` | `/api/admin/auth/register` | 公开 | 注册商家账号 |
+| `POST` | `/api/admin/auth/login` | 公开 | 商家登录并获取访问令牌 |
+
+消费者注册使用 `phone` 和 `password` 字段，手机号须符合中国大陆手机号格式，密码至少 8 个字符。商家注册和登录使用 `username`、`password`。登录后在需要认证的请求中携带对应身份令牌：
+
+```http
+Authorization: Bearer <access_token>
+```
+
+消费者令牌不能用于商家接口，商家令牌也不能用于消费者接口。当前商家账号有公开注册入口，正式部署前应限制其注册资格。
+
+### 店铺、分类和商品
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/shop` | 公开 | 获取店铺资料及营业、配送信息 |
+| `PUT` | `/api/shop` | 商家 | 更新店铺和配送设置 |
+| `GET` | `/api/categories` | 公开 | 查询商品分类 |
+| `POST` | `/api/categories` | 商家 | 新增商品分类 |
+| `PUT` | `/api/categories/{category_id}` | 商家 | 编辑商品分类 |
+| `DELETE` | `/api/categories/{category_id}` | 商家 | 删除分类；分类下仍有关联商品时不能删除 |
+| `GET` | `/api/dishes?category_id={id}` | 公开 | 查询上架商品；可按分类筛选 |
+| `GET` | `/api/dishes/{dish_id}` | 公开 | 查询上架商品详情 |
+| `GET` | `/api/admin/dishes` | 商家 | 查询商品；可按 `category_id`、`is_available` 筛选 |
+| `POST` | `/api/admin/dishes` | 商家 | 新增商品 |
+| `PUT` | `/api/admin/dishes/{dish_id}` | 商家 | 编辑商品资料 |
+| `PATCH` | `/api/admin/dishes/{dish_id}/availability` | 商家 | 上架或下架商品 |
+| `DELETE` | `/api/admin/dishes/{dish_id}` | 商家 | 删除商品 |
+
+公开商品列表只返回上架商品；商家查询可查看下架商品。订单金额、商品价格和库存以服务端数据与计算结果为准，不接受客户端提交金额作为结算依据。
+
+### 收货地址和购物车
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/address` | 消费者 | 查询本人收货地址 |
+| `POST` | `/api/address` | 消费者 | 新增收货地址 |
+| `PUT` | `/api/address/{address_id}` | 消费者 | 编辑本人地址 |
+| `DELETE` | `/api/address/{address_id}` | 消费者 | 删除本人地址 |
+| `PUT` | `/api/address/{address_id}/default` | 消费者 | 设为默认地址 |
+| `GET` | `/api/cart` | 消费者 | 查询本人购物车 |
+| `POST` | `/api/cart/items` | 消费者 | 加入商品，Body 包含 `dish_id`、`quantity` |
+| `PUT` | `/api/cart/items/{dish_id}` | 消费者 | 修改商品数量，Body 包含 `quantity` |
+| `DELETE` | `/api/cart/items/{dish_id}` | 消费者 | 移除购物车商品 |
+| `DELETE` | `/api/cart/items` | 消费者 | 清空购物车 |
+
+地址和购物车均按当前消费者隔离。完整字段和校验规则可在 `/docs` 查看。
+
+### 订单与履约
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/orders` | 消费者 | 按购物车创建普通订单；可选使用一张优惠券 |
+| `GET` | `/api/orders?page=1&page_size=20` | 消费者 | 分页查询本人订单 |
+| `GET` | `/api/orders/{order_id}` | 消费者 | 查询本人订单详情 |
+| `POST` | `/api/orders/{order_id}/cancel` | 消费者 | 取消待支付订单 |
+| `POST` | `/api/orders/{order_id}/pay` | 消费者 | 开发环境模拟支付，不连接真实支付渠道 |
+| `POST` | `/api/orders/{order_id}/confirm-receipt` | 消费者 | 确认收货 |
+| `GET` | `/api/admin/orders?page=1&page_size=20` | 商家 | 分页查询订单；支持 `status` 筛选 |
+| `PATCH` | `/api/admin/orders/{order_id}/status` | 商家 | 更新订单履约状态 |
+| `GET` | `/api/admin/statistics/overview` | 商家 | 查询经营汇总和商品销售排行 |
+
+普通订单创建 Body 示例：
+
+```json
+{
+  "address_id": 12,
+  "user_coupon_id": 34
+}
+```
+
+`user_coupon_id` 可省略或设为 `null`。后端会验证地址归属、营业状态、起送金额、商品状态和库存，并保存商品及收货信息快照；客户端不提交订单金额或配送费。订单列表响应中的 `data` 是数组，分页通过 `page`、`page_size` 查询，不返回额外分页对象。
+
+订单状态为 `pending_payment`（待支付）、`pending_acceptance`（待接单）、`pending_delivery`（配送中）、`completed`（已完成）和 `cancelled`（已取消）。正常履约顺序为待支付、待接单、配送中、已完成。消费者只能取消待支付订单；商家可按业务规则取消待接单或配送中订单。取消待支付订单会恢复商品库存，并按订单类型返还优惠券或秒杀名额。模拟支付需同时设置 `APP_ENV=development` 和 `ENABLE_SIMULATED_PAYMENTS=true`；项目未接入真实支付或未支付订单自动关单任务。
+
+### 优惠券
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/coupons` | 公开 | 查询有效且仍可领取的优惠券 |
+| `POST` | `/api/coupons/{coupon_id}/claim` | 消费者 | 领取优惠券；无需 Body |
+| `GET` | `/api/users/me/coupons?status=available` | 消费者 | 查询本人优惠券；状态可为 `available`、`used` 或 `expired` |
+| `GET` | `/api/admin/coupons` | 商家 | 查询优惠券及已领取数量 |
+| `POST` | `/api/admin/coupons` | 商家 | 创建优惠券 |
+| `PUT` | `/api/admin/coupons/{coupon_id}` | 商家 | 编辑优惠券 |
+| `PATCH` | `/api/admin/coupons/{coupon_id}/active` | 商家 | 启用或停止继续发放 |
+
+创建优惠券需提供 `name`、`discount_amount`、`total_quantity`、`start_time`、`end_time`；还可提供 `description`、`minimum_order_amount`、`per_user_limit` 和 `is_active`。时间使用 ISO 8601 格式；带时区值转换为 UTC，不带时区时按 UTC 处理。优惠券为固定金额立减券，一单最多使用一张；门槛按优惠前商品金额计算，配送费不参与抵扣，优惠额不超过商品金额。商家停发后，用户已领取的券仍可在有效期内使用；已有领取记录时不能修改优惠金额、门槛和有效期。
+
+### 限量秒杀
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/seckill/activities` | 公开 | 查询即将开始或进行中的活动 |
+| `GET` | `/api/seckill/activities/{activity_id}` | 公开 | 查询活动详情、状态和剩余名额 |
+| `POST` | `/api/seckill/activities/{activity_id}/orders` | 消费者 | 参加秒杀并创建待支付订单 |
+| `GET` | `/api/admin/seckill/activities` | 商家 | 查询全部活动 |
+| `POST` | `/api/admin/seckill/activities` | 商家 | 创建活动 |
+| `PUT` | `/api/admin/seckill/activities/{activity_id}` | 商家 | 编辑活动 |
+| `PATCH` | `/api/admin/seckill/activities/{activity_id}/active` | 商家 | 启用或停止活动 |
+
+秒杀下单 Body 示例：
+
+```json
+{
+  "address_id": 12,
+  "quantity": 1
+}
+```
+
+创建活动需提供 `name`、`dish_id`、`sale_price`、`stock`、`limit_per_user`、`start_time`、`end_time`；`is_active` 可选。活动价格不得高于商品原价，活动库存不得超过当前商品库存。下单时后端校验活动时段、活动余量、每人限购、商品库存和店铺营业状态，并在同一数据库事务中扣减活动名额和商品库存。秒杀不与优惠券叠加；取消待支付秒杀订单时回补商品库存和活动已售数量。该流程由数据库事务处理，不依赖 Redis 或消息队列。
+
+### 经营统计
+
+`GET /api/admin/statistics/overview` 支持 `period=today|week|month|custom` 和 `top_n`（1 至 100）参数。使用 `period=custom` 时还需提供 `start_date=YYYY-MM-DD`、`end_date=YYYY-MM-DD`。响应包含所选周期及累计订单、收入和销量汇总，以及商品销售排行。
+
+### 统一响应与错误
+
+成功响应示例：
+
+```json
+{
+  "code": 200,
+  "message": "请求成功",
+  "data": {}
+}
+```
+
+创建类接口的 HTTP 状态码通常为 `201`，响应体中的 `code` 仍为 `200`。错误响应示例：
+
+```json
+{
+  "code": 409,
+  "message": "业务状态不允许该操作",
+  "data": null
+}
+```
+
+HTTP 状态码与错误响应中的 `code` 一致。常见状态包括：`401` 未认证或令牌类型错误、`404` 资源不存在或不属于当前用户、`409` 库存/限额/业务状态冲突、`422` 请求字段校验失败和 `500` 服务器内部错误。订单金额、优惠计算和关键库存检查均由服务端负责。
 
 ## 检查
 
