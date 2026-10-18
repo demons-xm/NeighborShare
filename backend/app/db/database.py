@@ -17,23 +17,22 @@ if not config.DATABASE_URL.startswith("sqlite"):
 async_engine = create_async_engine(config.DATABASE_URL, **engine_options)
 
 AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,  # 绑定到之前创建的异步引擎
-    class_=AsyncSession,  # 指定会话类为 AsyncSession
-    expire_on_commit=False  # 提交后不使对象属性过期，保持数据可访问
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
 )
 
 
-# 依赖项，用于获取数据库会话
 async def get_db():
     async with AsyncSessionLocal() as session:
         try:
-            yield session  # 将会话对象产出给调用者，暂停函数执行直到请求结束
-            await session.commit()  # 如果无异常，提交事务
+            yield session
+            await session.commit()
         except Exception:
-            await session.rollback()  # 发生异常时回滚事务
-            raise  # 重新抛出异常以便上层处理
+            await session.rollback()
+            raise
         finally:
-            await session.close()  # 关闭会话，释放资源
+            await session.close()
 
 
 class Base(DeclarativeBase):

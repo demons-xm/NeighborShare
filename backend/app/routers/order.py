@@ -25,6 +25,7 @@ from app.services.order import (
     simulate_user_payment,
     update_order_status,
 )
+from app.services.coupon import UserCouponNotFoundError, UserCouponUnavailableError
 
 router = APIRouter(tags=["订单"])
 Page = Annotated[int, Query(ge=1)]
@@ -70,6 +71,16 @@ async def post_order(
             detail="菜品金额未达到起送价",
         ) from exc
     except OrderStatusConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except UserCouponNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="优惠券不存在",
+        ) from exc
+    except UserCouponUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),

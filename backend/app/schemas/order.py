@@ -15,6 +15,12 @@ OrderStatus = Literal[
 
 class OrderCreate(BaseModel):
     address_id: int = Field(gt=0)
+    user_coupon_id: int | None = Field(default=None, gt=0)
+
+
+class SeckillOrderCreate(BaseModel):
+    address_id: int = Field(gt=0)
+    quantity: int = Field(default=1, ge=1, le=100)
 
 
 class OrderStatusUpdate(BaseModel):
@@ -47,7 +53,12 @@ class OrderPublic(BaseModel):
     district: str
     address_detail: str
     dish_amount: Decimal
+    discount_amount: Decimal
     delivery_fee: Decimal
     total_amount: Decimal
+    source: Literal["cart", "seckill"]
+    coupon_id: int | None
+    user_coupon_id: int | None
+    seckill_activity_id: int | None
     create_time: datetime
     items: list[OrderItemPublic]

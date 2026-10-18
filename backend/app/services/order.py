@@ -1,19 +1,26 @@
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.address import Address
 from app.models.cart import Cart, CartItem
 from app.models.category import Category
+from app.models.coupon import UserCoupon
 from app.models.dish import Dish
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.seckill import SeckillActivity
 from app.models.shop import Shop
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderStatus
+from app.services.coupon import (
+    UserCouponUnavailableError,
+    get_user_coupon_for_update,
+    utc_now,
+)
 
 SHOP_ID = 1
 ADMIN_TRANSITIONS: dict[str, set[str]] = {
@@ -122,11 +129,29 @@ async def create_order(
     if dish_amount < shop.minimum_order_amount:
         raise MinimumOrderAmountError
 
+    user_coupon = None
+    discount_amount = Decimal("0.00")
+    if order_data.user_coupon_id is not None:
+        user_coupon = await get_user_coupon_for_update(
+            session,
+            user_id,
+            order_data.user_coupon_id,
+        )
+        coupon = user_coupon.coupon
+        if dish_amount < coupon.minimum_order_amount:
+            raise UserCouponUnavailableError("商品金额未达到优惠券使用门槛")
+        discount_amount = min(coupon.discount_amount, dish_amount)
+        user_coupon.status = "used"
+        user_coupon.redeemed_at = utc_now()
+
     delivery_fee = shop.delivery_fee
     order = Order(
         order_no=uuid4().hex,
         user_id=user_id,
         status="pending_payment",
+        source="cart",
+        coupon_id=user_coupon.coupon_id if user_coupon else None,
+        user_coupon_id=user_coupon.id if user_coupon else None,
         recipient_name=address.recipient_name,
         recipient_phone=address.phone,
         province=address.province,
@@ -134,8 +159,9 @@ async def create_order(
         district=address.district,
         address_detail=address.detail,
         dish_amount=dish_amount,
+        discount_amount=discount_amount,
         delivery_fee=delivery_fee,
-        total_amount=dish_amount + delivery_fee,
+        total_amount=dish_amount - discount_amount + delivery_fee,
     )
     for item in cart_items:
         dish = dishes[item.dish_id]
@@ -266,7 +292,11 @@ async def update_order_status(
         raise OrderStatusConflictError("不允许的订单状态流转")
 
     if new_status == "cancelled":
-        await _restore_order_stock(session, order)
+        await _restore_order_stock(
+            session,
+            order,
+            restore_coupon=False,
+        )
     order.status = new_status
     await session.flush()
     return order
@@ -286,7 +316,27 @@ async def _get_order_for_update(
     return order
 
 
-async def _restore_order_stock(session: AsyncSession, order: Order) -> None:
+async def _restore_order_stock(
+    session: AsyncSession,
+    order: Order,
+    *,
+    restore_coupon: bool = True,
+) -> None:
+    if order.seckill_activity_id is not None:
+        sold_quantity = sum(item.quantity for item in order.items)
+        restored = await session.execute(
+            update(SeckillActivity)
+            .where(
+                SeckillActivity.id == order.seckill_activity_id,
+                SeckillActivity.sold_count >= sold_quantity,
+            )
+            .values(
+                sold_count=SeckillActivity.sold_count - sold_quantity
+            )
+        )
+        if restored.rowcount != 1:
+            raise OrderStatusConflictError("秒杀库存状态异常，无法取消订单")
+
     dish_ids = sorted(
         {item.dish_id for item in order.items if item.dish_id is not None}
     )
@@ -299,3 +349,13 @@ async def _restore_order_stock(session: AsyncSession, order: Order) -> None:
         dish.stock += sum(
             item.quantity for item in order.items if item.dish_id == dish_id
         )
+
+    if restore_coupon and order.user_coupon_id is not None:
+        user_coupon = await session.scalar(
+            select(UserCoupon)
+            .where(UserCoupon.id == order.user_coupon_id)
+            .with_for_update()
+        )
+        if user_coupon is not None and user_coupon.status == "used":
+            user_coupon.status = "available"
+            user_coupon.redeemed_at = None

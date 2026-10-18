@@ -107,10 +107,55 @@ export interface Order {
   district: string
   address_detail: string
   dish_amount: string
+  discount_amount: string
   delivery_fee: string
   total_amount: string
+  source: 'cart' | 'seckill'
+  coupon_id: number | null
+  user_coupon_id: number | null
+  seckill_activity_id: number | null
   create_time: string
   items: OrderItem[]
+}
+
+export interface Coupon {
+  id: number
+  name: string
+  description: string | null
+  discount_amount: string
+  minimum_order_amount: string
+  total_quantity: number
+  claimed_quantity: number
+  per_user_limit: number
+  start_time: string
+  end_time: string
+  is_active: boolean
+}
+
+export interface UserCoupon {
+  id: number
+  status: 'available' | 'used' | 'expired'
+  claimed_at: string
+  redeemed_at: string | null
+  coupon: Coupon
+}
+
+export interface SeckillActivity {
+  id: number
+  name: string
+  dish_id: number
+  dish_name: string
+  dish_image_url: string | null
+  original_price: string
+  sale_price: string
+  stock: number
+  sold_count: number
+  remaining_stock: number
+  limit_per_user: number
+  start_time: string
+  end_time: string
+  is_active: boolean
+  status: 'upcoming' | 'active' | 'sold_out' | 'ended' | 'inactive'
 }
 
 export interface Statistics {

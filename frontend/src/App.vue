@@ -6,13 +6,16 @@ import type {
   Admin,
   Cart,
   Category,
+  Coupon,
   Dish,
   LoginData,
   Order,
   OrderStatus,
+  SeckillActivity,
   Shop,
   Statistics,
   User,
+  UserCoupon,
 } from '@/types/api'
 
 type View = 'discover' | 'orders' | 'merchant'
@@ -29,6 +32,11 @@ const cart = ref<Cart>({ items: [], total_quantity: 0, total_amount: '0.00' })
 const addresses = ref<Address[]>([])
 const orders = ref<Order[]>([])
 const adminOrders = ref<Order[]>([])
+const coupons = ref<Coupon[]>([])
+const userCoupons = ref<UserCoupon[]>([])
+const seckillActivities = ref<SeckillActivity[]>([])
+const adminCoupons = ref<Coupon[]>([])
+const adminSeckillActivities = ref<SeckillActivity[]>([])
 const statistics = ref<Statistics | null>(null)
 const activeView = ref<View>('discover')
 const activeCategory = ref<number | null>(null)
@@ -40,6 +48,7 @@ const busy = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 const selectedAddressId = ref<number | null>(null)
+const selectedUserCouponId = ref<number | null>(null)
 const editingAddressId = ref<number | null>(null)
 const authForm = reactive({ phone: '', username: '', password: '' })
 const addressForm = reactive({
@@ -59,7 +68,28 @@ const dishForm = reactive({
   category_id: 0,
 })
 const editingDishId = ref<number | null>(null)
+const editingCouponId = ref<number | null>(null)
+const editingSeckillActivityId = ref<number | null>(null)
 const categoryName = ref('')
+const couponForm = reactive({
+  name: '',
+  description: '',
+  discount_amount: '',
+  minimum_order_amount: '0',
+  total_quantity: 1,
+  per_user_limit: 1,
+  start_time: localDateTime(0),
+  end_time: localDateTime(24),
+})
+const seckillForm = reactive({
+  name: '',
+  dish_id: 0,
+  sale_price: '',
+  stock: 1,
+  limit_per_user: 1,
+  start_time: localDateTime(0),
+  end_time: localDateTime(1),
+})
 
 const visibleDishes = computed(() =>
   activeCategory.value === null
@@ -72,6 +102,57 @@ const cartItemsCount = computed(() => cart.value.total_quantity)
 const activeAddress = computed(() =>
   addresses.value.find((address) => address.id === selectedAddressId.value),
 )
+const availableUserCoupons = computed(() =>
+  userCoupons.value.filter((userCoupon) => userCoupon.status === 'available'),
+)
+const selectedUserCoupon = computed(() =>
+  availableUserCoupons.value.find(
+    (userCoupon) => userCoupon.id === selectedUserCouponId.value,
+  ),
+)
+const editingCouponHasClaims = computed(() =>
+  adminCoupons.value.some(
+    (coupon) =>
+      coupon.id === editingCouponId.value && coupon.claimed_quantity > 0,
+  ),
+)
+const couponDiscountPreview = computed(() => {
+  const userCoupon = selectedUserCoupon.value
+  if (
+    !userCoupon ||
+    Number(cart.value.total_amount) < Number(userCoupon.coupon.minimum_order_amount)
+  ) {
+    return 0
+  }
+  return Math.min(
+    Number(cart.value.total_amount),
+    Number(userCoupon.coupon.discount_amount),
+  )
+})
+const checkoutTotalPreview = computed(() =>
+  Math.max(
+    0,
+    Number(cart.value.total_amount) -
+      couponDiscountPreview.value +
+      Number(shop.value?.delivery_fee ?? 0),
+  ),
+)
+
+function localDateTime(hoursFromNow: number) {
+  const date = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000)
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+  return date.toISOString().slice(0, 16)
+}
+
+function apiDateTime(value: string) {
+  return new Date(value).toISOString()
+}
+
+function inputDateTime(value: string) {
+  const date = new Date(value)
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+  return date.toISOString().slice(0, 16)
+}
 
 function readStored<T>(key: string): T | null {
   try {
@@ -136,6 +217,8 @@ function logout(role: 'user' | 'admin') {
     cart.value = { items: [], total_quantity: 0, total_amount: '0.00' }
     addresses.value = []
     orders.value = []
+    userCoupons.value = []
+    selectedUserCouponId.value = null
     localStorage.removeItem('neighborshare.userToken')
     localStorage.removeItem('neighborshare.user')
   } else {
@@ -154,10 +237,14 @@ async function loadPublicData() {
     get<Shop>('/api/shop'),
     get<Category[]>('/api/categories'),
     get<Dish[]>('/api/dishes'),
+    get<Coupon[]>('/api/coupons'),
+    get<SeckillActivity[]>('/api/seckill/activities'),
   ])
   shop.value = results[0]
   categories.value = results[1]
   dishes.value = results[2]
+  coupons.value = results[3]
+  seckillActivities.value = results[4]
 }
 
 async function loadCart() {
@@ -182,6 +269,17 @@ async function loadUserData() {
       const result = await run(() => get<Order[]>('/api/orders', userToken.value))
       if (result) orders.value = result
     })(),
+    (async () => {
+      const result = await run(() =>
+        get<UserCoupon[]>('/api/users/me/coupons', userToken.value),
+      )
+      if (result) {
+        userCoupons.value = result
+        if (!result.some((item) => item.id === selectedUserCouponId.value)) {
+          selectedUserCouponId.value = null
+        }
+      }
+    })(),
   ])
 }
 
@@ -193,10 +291,23 @@ async function loadMerchantData() {
     run(() =>
       get<Dish[]>('/api/admin/dishes', adminToken.value),
     ),
+    run(() => get<Coupon[]>('/api/admin/coupons', adminToken.value)),
+    run(() =>
+      get<SeckillActivity[]>(
+        '/api/admin/seckill/activities',
+        adminToken.value,
+      ),
+    ),
   ])
   if (results[0]) adminOrders.value = results[0]
   if (results[1]) statistics.value = results[1]
   if (results[2]) dishes.value = results[2]
+  if (results[3]) adminCoupons.value = results[3]
+  if (results[4]) adminSeckillActivities.value = results[4]
+  const firstDish = dishes.value[0]
+  if (seckillForm.dish_id === 0 && firstDish) {
+    seckillForm.dish_id = firstDish.id
+  }
 }
 
 function openAuth(role: 'user' | 'admin', mode: AuthMode = 'login') {
@@ -255,6 +366,48 @@ async function addToCart(dish: Dish) {
     cart.value = result
     notify(`${dish.name} 已加入购物车`, true)
   }
+}
+
+async function claimCoupon(coupon: Coupon) {
+  if (!loggedIn.value) {
+    openAuth('user')
+    return
+  }
+  const claimed = await run(() =>
+    post<UserCoupon>(
+      `/api/coupons/${coupon.id}/claim`,
+      undefined,
+      userToken.value,
+    ),
+  )
+  if (!claimed) return
+  userCoupons.value.unshift(claimed)
+  await run(loadPublicData)
+  notify('优惠券已放入你的卡包', true)
+}
+
+async function buySeckill(activity: SeckillActivity) {
+  if (!loggedIn.value) {
+    openAuth('user')
+    return
+  }
+  if (!selectedAddressId.value) {
+    openAddressDialog()
+    notify('请先添加收货地址，再参与秒杀')
+    return
+  }
+  const order = await run(() =>
+    post<Order>(
+      `/api/seckill/activities/${activity.id}/orders`,
+      { address_id: selectedAddressId.value, quantity: 1 },
+      userToken.value,
+    ),
+  )
+  if (!order) return
+  orders.value.unshift(order)
+  activeView.value = 'orders'
+  await run(loadPublicData)
+  notify('秒杀成功，订单已创建', true)
 }
 
 async function setQuantity(dishId: number, quantity: number) {
@@ -369,7 +522,10 @@ async function checkout() {
   const order = await run(() =>
     post<Order>(
       '/api/orders',
-      { address_id: selectedAddressId.value },
+      {
+        address_id: selectedAddressId.value,
+        user_coupon_id: selectedUserCouponId.value,
+      },
       userToken.value,
     ),
   )
@@ -384,8 +540,179 @@ async function checkout() {
     return
   }
   cart.value = { items: [], total_quantity: 0, total_amount: '0.00' }
+  selectedUserCouponId.value = null
+  await loadUserData()
   notify('订单创建成功，请在订单中完成支付', true)
   activeView.value = 'orders'
+}
+
+async function createCoupon() {
+  const editingCoupon = adminCoupons.value.find(
+    (coupon) => coupon.id === editingCouponId.value,
+  )
+  const common = {
+    name: couponForm.name,
+    description: couponForm.description || null,
+    total_quantity: Number(couponForm.total_quantity),
+    per_user_limit: Number(couponForm.per_user_limit),
+  }
+  const payload =
+    editingCoupon && editingCoupon.claimed_quantity > 0
+      ? common
+      : {
+          ...common,
+          discount_amount: Number(couponForm.discount_amount),
+          minimum_order_amount: Number(couponForm.minimum_order_amount),
+          start_time: apiDateTime(couponForm.start_time),
+          end_time: apiDateTime(couponForm.end_time),
+        }
+  const wasEditing = editingCouponId.value !== null
+  const result = editingCouponId.value
+    ? await run(() =>
+        put<Coupon>(
+          `/api/admin/coupons/${editingCouponId.value}`,
+          payload,
+          adminToken.value,
+        ),
+      )
+    : await run(() =>
+        post<Coupon>('/api/admin/coupons', payload, adminToken.value),
+      )
+  if (!result) return
+  const index = adminCoupons.value.findIndex((item) => item.id === result.id)
+  if (index >= 0) adminCoupons.value[index] = result
+  else adminCoupons.value.unshift(result)
+  editingCouponId.value = null
+  couponForm.name = ''
+  couponForm.description = ''
+  couponForm.discount_amount = ''
+  couponForm.start_time = localDateTime(0)
+  couponForm.end_time = localDateTime(24)
+  notify(wasEditing ? '优惠券已更新' : '优惠券已创建', true)
+}
+
+function editCoupon(coupon: Coupon) {
+  editingCouponId.value = coupon.id
+  Object.assign(couponForm, {
+    name: coupon.name,
+    description: coupon.description ?? '',
+    discount_amount: coupon.discount_amount,
+    minimum_order_amount: coupon.minimum_order_amount,
+    total_quantity: coupon.total_quantity,
+    per_user_limit: coupon.per_user_limit,
+    start_time: inputDateTime(coupon.start_time),
+    end_time: inputDateTime(coupon.end_time),
+  })
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function cancelCouponEdit() {
+  editingCouponId.value = null
+  Object.assign(couponForm, {
+    name: '',
+    description: '',
+    discount_amount: '',
+    minimum_order_amount: '0',
+    total_quantity: 1,
+    per_user_limit: 1,
+    start_time: localDateTime(0),
+    end_time: localDateTime(24),
+  })
+}
+
+async function toggleCoupon(coupon: Coupon) {
+  const result = await run(() =>
+    patch<Coupon>(
+      `/api/admin/coupons/${coupon.id}/active`,
+      { is_active: !coupon.is_active },
+      adminToken.value,
+    ),
+  )
+  if (result) {
+    const index = adminCoupons.value.findIndex((item) => item.id === result.id)
+    if (index >= 0) adminCoupons.value[index] = result
+  }
+}
+
+async function createSeckillActivity() {
+  const wasEditing = editingSeckillActivityId.value !== null
+  const payload = {
+    ...seckillForm,
+    sale_price: Number(seckillForm.sale_price),
+    start_time: apiDateTime(seckillForm.start_time),
+    end_time: apiDateTime(seckillForm.end_time),
+  }
+  const result = editingSeckillActivityId.value
+    ? await run(() =>
+        put<SeckillActivity>(
+          `/api/admin/seckill/activities/${editingSeckillActivityId.value}`,
+          payload,
+          adminToken.value,
+        ),
+      )
+    : await run(() =>
+        post<SeckillActivity>(
+          '/api/admin/seckill/activities',
+          payload,
+          adminToken.value,
+        ),
+      )
+  if (!result) return
+  const index = adminSeckillActivities.value.findIndex(
+    (item) => item.id === result.id,
+  )
+  if (index >= 0) adminSeckillActivities.value[index] = result
+  else adminSeckillActivities.value.unshift(result)
+  editingSeckillActivityId.value = null
+  seckillForm.name = ''
+  seckillForm.sale_price = ''
+  seckillForm.start_time = localDateTime(0)
+  seckillForm.end_time = localDateTime(1)
+  notify(wasEditing ? '秒杀活动已更新' : '秒杀活动已创建', true)
+}
+
+function editSeckillActivity(activity: SeckillActivity) {
+  editingSeckillActivityId.value = activity.id
+  Object.assign(seckillForm, {
+    name: activity.name,
+    dish_id: activity.dish_id,
+    sale_price: activity.sale_price,
+    stock: activity.stock,
+    limit_per_user: activity.limit_per_user,
+    start_time: inputDateTime(activity.start_time),
+    end_time: inputDateTime(activity.end_time),
+  })
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function cancelSeckillEdit() {
+  editingSeckillActivityId.value = null
+  Object.assign(seckillForm, {
+    name: '',
+    dish_id: dishes.value[0]?.id ?? 0,
+    sale_price: '',
+    stock: 1,
+    limit_per_user: 1,
+    start_time: localDateTime(0),
+    end_time: localDateTime(1),
+  })
+}
+
+async function toggleSeckillActivity(activity: SeckillActivity) {
+  const result = await run(() =>
+    patch<SeckillActivity>(
+      `/api/admin/seckill/activities/${activity.id}/active`,
+      { is_active: !activity.is_active },
+      adminToken.value,
+    ),
+  )
+  if (result) {
+    const index = adminSeckillActivities.value.findIndex(
+      (item) => item.id === result.id,
+    )
+    if (index >= 0) adminSeckillActivities.value[index] = result
+    await run(loadPublicData)
+  }
 }
 
 async function payOrder(order: Order) {
@@ -658,6 +985,34 @@ onMounted(async () => {
           </div>
         </section>
 
+        <section v-if="coupons.length || seckillActivities.length" class="deals-section">
+          <div class="section-heading">
+            <div><span class="eyebrow">TODAY'S OFFERS</span><h2>优惠与限时秒杀</h2></div>
+          </div>
+          <div v-if="coupons.length" class="deal-grid">
+            <article v-for="coupon in coupons" :key="coupon.id" class="deal-card coupon-card">
+              <span class="deal-tag">优惠券</span>
+              <strong>{{ coupon.name }}</strong>
+              <b>{{ formatPrice(coupon.discount_amount) }} 立减</b>
+              <small>满 {{ formatPrice(coupon.minimum_order_amount) }} 可用 · 剩余 {{ coupon.total_quantity - coupon.claimed_quantity }} 张</small>
+              <button class="button button-outline button-small" :disabled="busy" @click="claimCoupon(coupon)">领取</button>
+            </article>
+          </div>
+          <div v-if="seckillActivities.length" class="deal-grid">
+            <article v-for="activity in seckillActivities" :key="activity.id" class="deal-card seckill-card">
+              <span class="deal-tag">限时秒杀 · {{ activity.status === 'upcoming' ? '即将开始' : '进行中' }}</span>
+              <strong>{{ activity.name }} · {{ activity.dish_name }}</strong>
+              <div><b>{{ formatPrice(activity.sale_price) }}</b><del>{{ formatPrice(activity.original_price) }}</del></div>
+              <small>剩余 {{ activity.remaining_stock }} 份 · 每人限购 {{ activity.limit_per_user }} 份</small>
+              <button
+                class="button button-dark button-small"
+                :disabled="busy || activity.status !== 'active' || !shop?.is_open"
+                @click="buySeckill(activity)"
+              >{{ activity.status === 'upcoming' ? '尚未开始' : activity.status === 'sold_out' ? '已售罄' : '立即抢购' }}</button>
+            </article>
+          </div>
+        </section>
+
         <section id="menu" class="menu-section">
           <div class="section-heading">
             <div><span class="eyebrow">MADE WITH CARE</span><h2>今天想吃点什么？</h2></div>
@@ -720,6 +1075,7 @@ onMounted(async () => {
             <div class="order-summary">
               <div class="order-items">
                 <span v-for="item in order.items" :key="item.id">{{ item.dish_name }} <small>× {{ item.quantity }}</small></span>
+                <small v-if="order.discount_amount !== '0.00'">优惠抵扣 {{ formatPrice(order.discount_amount) }}</small>
                 <small>{{ order.recipient_name }} · {{ order.recipient_phone }} · {{ order.city }}{{ order.district }}{{ order.address_detail }}</small>
               </div>
               <div class="order-total"><strong>{{ formatPrice(order.total_amount) }}</strong>
@@ -780,6 +1136,45 @@ onMounted(async () => {
                 <label class="field field-wide">商品介绍<textarea v-model.trim="dishForm.description" rows="2"></textarea></label>
                 <button class="button button-dark field-wide" type="submit" :disabled="busy || !categories.length">{{ editingDishId ? '保存商品' : '添加商品' }}</button>
               </form>
+            </section>
+          </div>
+          <div class="merchant-columns">
+            <section class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">COUPON CAMPAIGNS</span><h3>{{ editingCouponId ? '编辑优惠券' : '优惠券管理' }}</h3></div><button v-if="editingCouponId" class="text-button" @click="cancelCouponEdit">取消编辑</button></div>
+              <form class="form-grid" @submit.prevent="createCoupon">
+                <label class="field field-wide">优惠券名称<input v-model.trim="couponForm.name" required maxlength="100" /></label>
+                <label class="field">立减金额<input v-model="couponForm.discount_amount" type="number" min="0.01" step="0.01" :disabled="editingCouponHasClaims" required /></label>
+                <label class="field">使用门槛<input v-model="couponForm.minimum_order_amount" type="number" min="0" step="0.01" :disabled="editingCouponHasClaims" required /></label>
+                <label class="field">发放数量<input v-model.number="couponForm.total_quantity" type="number" min="1" required /></label>
+                <label class="field">每人限领<input v-model.number="couponForm.per_user_limit" type="number" min="1" required /></label>
+                <label class="field">开始时间<input v-model="couponForm.start_time" type="datetime-local" :disabled="editingCouponHasClaims" required /></label>
+                <label class="field">结束时间<input v-model="couponForm.end_time" type="datetime-local" :disabled="editingCouponHasClaims" required /></label>
+                <label class="field field-wide">使用说明<input v-model.trim="couponForm.description" maxlength="500" /></label>
+                <button class="button button-dark field-wide" type="submit" :disabled="busy">{{ editingCouponId ? '保存优惠券' : '创建优惠券' }}</button>
+              </form>
+              <div v-for="coupon in adminCoupons" :key="coupon.id" class="deal-admin-row">
+                <span><strong>{{ coupon.name }}</strong><small>{{ formatPrice(coupon.discount_amount) }} 立减 · 已领 {{ coupon.claimed_quantity }}/{{ coupon.total_quantity }}</small></span>
+                <div class="merchant-actions"><button class="text-button" :disabled="busy" @click="editCoupon(coupon)">编辑</button><button class="text-button" :disabled="busy" @click="toggleCoupon(coupon)">{{ coupon.is_active ? '停用' : '启用' }}</button></div>
+              </div>
+              <div v-if="!adminCoupons.length" class="empty-inline">还没有优惠券。</div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">LIMITED-TIME SALES</span><h3>{{ editingSeckillActivityId ? '编辑秒杀活动' : '秒杀活动' }}</h3></div><button v-if="editingSeckillActivityId" class="text-button" @click="cancelSeckillEdit">取消编辑</button></div>
+              <form class="form-grid" @submit.prevent="createSeckillActivity">
+                <label class="field field-wide">活动名称<input v-model.trim="seckillForm.name" required maxlength="100" /></label>
+                <label class="field field-wide">秒杀商品<select v-model.number="seckillForm.dish_id" :disabled="editingSeckillActivityId !== null" required><option v-for="dish in dishes" :key="dish.id" :value="dish.id">{{ dish.name }} · 原价 {{ formatPrice(dish.price) }}</option></select></label>
+                <label class="field">秒杀价<input v-model="seckillForm.sale_price" type="number" min="0" step="0.01" required /></label>
+                <label class="field">活动库存<input v-model.number="seckillForm.stock" type="number" min="1" required /></label>
+                <label class="field">每人限购<input v-model.number="seckillForm.limit_per_user" type="number" min="1" required /></label>
+                <label class="field">开始时间<input v-model="seckillForm.start_time" type="datetime-local" required /></label>
+                <label class="field">结束时间<input v-model="seckillForm.end_time" type="datetime-local" required /></label>
+                <button class="button button-dark field-wide" type="submit" :disabled="busy || !dishes.length">{{ editingSeckillActivityId ? '保存活动' : '创建活动' }}</button>
+              </form>
+              <div v-for="activity in adminSeckillActivities" :key="activity.id" class="deal-admin-row">
+                <span><strong>{{ activity.name }} · {{ activity.dish_name }}</strong><small>{{ formatPrice(activity.sale_price) }} · 剩余 {{ activity.remaining_stock }}/{{ activity.stock }} · {{ activity.status }}</small></span>
+                <div class="merchant-actions"><button class="text-button" :disabled="busy" @click="editSeckillActivity(activity)">编辑</button><button class="text-button" :disabled="busy" @click="toggleSeckillActivity(activity)">{{ activity.is_active ? '停止' : '启用' }}</button></div>
+              </div>
+              <div v-if="!adminSeckillActivities.length" class="empty-inline">还没有秒杀活动。</div>
             </section>
           </div>
           <section class="panel merchant-list-panel">
@@ -849,7 +1244,19 @@ onMounted(async () => {
         <button v-else class="address-empty" @click="openAddressDialog">＋ 添加收货地址</button>
       </div>
       <div class="cart-total"><span>商品金额 <small>配送费以结算为准</small></span><strong>{{ formatPrice(cart.total_amount) }}</strong></div>
-      <button class="button button-dark checkout-button" :disabled="busy || !shop?.is_open || !cart.items.length" @click="checkout">去结算 <span>{{ formatPrice(cart.total_amount) }}</span></button>
+      <div v-if="availableUserCoupons.length" class="coupon-choice">
+        <label class="field">使用优惠券
+          <select v-model.number="selectedUserCouponId">
+            <option :value="null">不使用优惠券</option>
+            <option v-for="userCoupon in availableUserCoupons" :key="userCoupon.id" :value="userCoupon.id">
+              {{ userCoupon.coupon.name }} · 立减 {{ formatPrice(userCoupon.coupon.discount_amount) }}
+            </option>
+          </select>
+        </label>
+        <small v-if="selectedUserCoupon && couponDiscountPreview === 0">商品金额未达到使用门槛 {{ formatPrice(selectedUserCoupon.coupon.minimum_order_amount) }}</small>
+        <small v-else-if="couponDiscountPreview > 0">优惠 {{ formatPrice(couponDiscountPreview) }}</small>
+      </div>
+      <button class="button button-dark checkout-button" :disabled="busy || !shop?.is_open || !cart.items.length" @click="checkout">去结算 <span>{{ formatPrice(checkoutTotalPreview) }}</span></button>
     </section>
 
     <footer class="footer"><span>邻享生活 <small>把邻里的美好，分享给每一天。</small></span><span>邻里好味 · 用心分享</span></footer>

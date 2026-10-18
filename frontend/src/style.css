@@ -117,3 +117,34 @@ a { color: inherit; text-decoration: none; }
   .merchant-dish { flex-wrap: wrap; padding: 8px 0; }.merchant-actions { margin-left: auto; }.merchant-dish > .price { margin-left: 55px; }.admin-order-row { flex-wrap: wrap; padding: 10px 0; }.admin-order-row > div { flex-basis: 70%; }.admin-order-row select { margin-left: auto; }
   .modal { padding: 31px 23px; }.form-grid { gap: 10px; }
 }
+
+.deals-section { max-width: 1080px; padding: 42px 24px 8px; margin: 0 auto; }
+.deals-section .section-heading { margin-bottom: 18px; }
+.deal-grid { margin-bottom: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.deal-card { min-height: 158px; padding: 17px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border: 1px solid #ece9df; border-radius: 5px; background: var(--white); }
+.coupon-card { border-left: 3px solid #d88861; }
+.seckill-card { border-left: 3px solid var(--green); }
+.deal-tag { color: #88927f; font-size: 9px; letter-spacing: .08em; }
+.deal-card > strong { color: #3e4d41; font-size: 13px; }
+.deal-card b { color: #c9744d; font-size: 17px; }
+.deal-card del { margin-left: 9px; color: #9b9e96; font-size: 10px; }
+.deal-card small { flex: 1; color: #91968c; font-size: 10px; }
+.deal-card .button { min-height: 31px; }
+.coupon-choice { padding: 5px 0 12px; }
+.coupon-choice select { width: 100%; margin-top: 5px; padding: 9px; border: 1px solid #e8e7df; border-radius: 4px; color: #667065; background: transparent; font-size: 10px; }
+.coupon-choice > small { display: block; margin-top: 5px; color: #bf724e; font-size: 9px; }
+.deal-admin-row { min-height: 52px; padding: 8px 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #efeee8; }
+.deal-admin-row > span { min-width: 0; }
+.deal-admin-row strong, .deal-admin-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deal-admin-row strong { color: #475348; font-size: 10px; }
+.deal-admin-row small { margin-top: 4px; color: #989b93; font-size: 9px; }
+
+@media (max-width: 850px) {
+  .deals-section { padding: 35px 20px 6px; }
+}
+
+@media (max-width: 580px) {
+  .deals-section { padding: 30px 16px 4px; }
+  .deal-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .deal-card { min-height: 174px; padding: 12px; }
+}

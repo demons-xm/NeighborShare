@@ -4,19 +4,23 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import config
-# 一定要每次从models里面导入模型，用于创建表
-from app.models.user import User
-from app.models.admin import Admin
-from app.models.address import Address
-from app.models.shop import Shop
-from app.models.category import Category
-from app.models.dish import Dish
-from app.models.cart import Cart, CartItem
-from app.models.order import Order
-from app.models.order_item import OrderItem
-
 from app.common.exceptions import register_exception_handlers
 from app.db.database import Base, async_engine
+from app.models import (
+    Address,
+    Admin,
+    Cart,
+    CartItem,
+    Category,
+    Coupon,
+    Dish,
+    Order,
+    OrderItem,
+    SeckillActivity,
+    Shop,
+    User,
+    UserCoupon,
+)
 from app.routers import router as api_router
 from app.services.admin import ensure_bootstrap_admin
 from app.services.shop import get_shop

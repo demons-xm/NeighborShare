@@ -1,11 +1,11 @@
-# 邻享生活前端
+# NeighborShare 前端
 
-基于 Vue 3、TypeScript 和 Vite，包含消费者浏览/购物/订单与商家管理工作台。
+Vue 3、TypeScript 和 Vite 应用，包含商品浏览、购物车、优惠券、秒杀下单、订单查询和商家工作台。
 
 ## 本地运行
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
@@ -17,7 +17,7 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8000
 
 也可设置 `VITE_API_BASE_URL` 让浏览器直接请求 API；这种方式要求后端允许该前端源的跨域访问。环境变量示例见 `.env.example`。
 
-## 检查与生产构建
+## 检查与构建
 
 ```sh
 npm run build
